@@ -966,8 +966,51 @@ async fn rate_limit_snapshot_keeps_prior_credits_when_missing_from_headers() {
 }
 
 #[tokio::test]
+async fn rolling_rate_limit_snapshot_populates_status_for_custom_provider() {
+    let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.requires_openai_auth = false;
+
+    chat.on_rolling_rate_limit_snapshot(RateLimitSnapshot {
+        limit_id: None,
+        limit_name: None,
+        normal_model_slug: None,
+        primary: Some(RateLimitWindow {
+            used_percent: 25,
+            window_duration_mins: Some(7 * 24 * 60),
+            resets_at: None,
+        }),
+        secondary: Some(RateLimitWindow {
+            used_percent: 40,
+            window_duration_mins: Some(5 * 60),
+            resets_at: None,
+        }),
+        credits: None,
+        individual_limit: None,
+        plan_type: None,
+        spend_control_reached: None,
+        rate_limit_reached_type: None,
+    });
+
+    chat.add_status_output(
+        /*refreshing_rate_limits*/ false, /*request_id*/ None,
+    );
+    let cells = drain_insert_history(&mut rx);
+    let status = lines_to_single_string(cells.last().expect("status output inserted"));
+    let limits = status
+        .lines()
+        .filter(|line| line.contains("limit"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    insta::assert_snapshot!(limits, @r"
+    │  Weekly limit:         [███████████████░░░░░] 75% left             │
+    │  5h limit:             [████████████░░░░░░░░] 60% left             │
+    ");
+}
+
+#[tokio::test]
 async fn rolling_rate_limit_snapshot_preserves_prior_individual_limit() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.requires_openai_auth = false;
     let mut usage_limits = snapshot(/*percent*/ 10.0);
     usage_limits.individual_limit = Some(SpendControlLimitSnapshot {
         limit: "25000".to_string(),

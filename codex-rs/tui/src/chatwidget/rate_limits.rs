@@ -360,15 +360,26 @@ impl ChatWidget {
                 self.rate_limit_switch_prompt = RateLimitSwitchPromptState::Pending;
             }
 
-            // /wham/usage identifies ordinary and additional model limits separately. Streamed
-            // updates still drive warnings/recovery above, but must not overwrite status data.
-            if matches!(source, RateLimitSnapshotSource::AccountUsage) {
+            // Account usage is authoritative for providers that support it. Custom API-key
+            // providers do not receive account usage reads, so streamed limits are their only
+            // source for status data.
+            let should_store_for_status = matches!(source, RateLimitSnapshotSource::AccountUsage)
+                || !self.requires_openai_auth;
+            if should_store_for_status {
                 let limit_label = snapshot
                     .limit_name
                     .clone()
                     .unwrap_or_else(|| limit_id.clone());
-                let display =
+                let mut display =
                     rate_limit_snapshot_display_for_limit(&snapshot, limit_label, Local::now());
+                if matches!(source, RateLimitSnapshotSource::RollingUpdate)
+                    && snapshot.individual_limit.is_none()
+                {
+                    display.individual_limit = self
+                        .rate_limit_snapshots_by_limit_id
+                        .get(&limit_id)
+                        .and_then(|display| display.individual_limit.clone());
+                }
                 self.rate_limit_snapshots_by_limit_id
                     .insert(limit_id, display);
             }
